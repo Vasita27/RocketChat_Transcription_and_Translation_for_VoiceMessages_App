@@ -52,10 +52,10 @@ python app.py
 https://github.com/RocketChat/Rocket.Chat/blob/develop/README.md
 ```
 
-**Clone this repo:**
+**Clone this repo in the Rocket.Chat folder:**
 
 ```bash
-git clone https://github.com/your-username/rocketchat-transcription-app.git
+git clone https://github.com/Vasita27/RocketChat_Transcription_and_Translation_for_VoiceMessages_App.git
 cd rocketchat-transcription-app/rocket-chat-app
 ```
 
@@ -64,16 +64,6 @@ cd rocketchat-transcription-app/rocket-chat-app
 ```bash
 npm install -g @rocket.chat/apps-cli
 ```
-
-**Deploy the app:**
-
-```bash
-rc-apps deploy
-```
-
-> ⚠️ You must have admin credentials and an active Rocket.Chat instance with developer mode enabled.
-
----
 
 ## 🌐 Configuration
 
@@ -87,21 +77,13 @@ const response = await http.post('http://<YOUR_LOCAL_IP>:5005/transcribe', {
 
 > 💡 Use `ipconfig` (Windows) or `ifconfig` (Linux/macOS) to find your local IP.
 
-You can also expose your Flask server using [ngrok](https://ngrok.com/):
-
-```bash
-ngrok http 5005
-```
-
-Then replace the local IP with the ngrok URL.
-
 ---
 
 ### 🔐 Gemini Translation API
 
 Used for translating the transcription result.
 
-1. Sign up at [Google AI Studio](https://makersuite.google.com/)
+1. Sign up at [Google AI Studio](https://aistudio.google.com/apikey)
 2. Create a Gemini API key (free-tier supported).
 3. Paste your API key in `TranscriptionApp.ts`:
 
@@ -110,6 +92,16 @@ const apiKey = "YOUR_GEMINI_API_KEY"
 ```
 
 > ⚠️ For production use, **store this securely** using Rocket.Chat App settings instead of hardcoding it.
+
+---
+
+**Deploy the app or package and upload the zip folder that is generated:**
+
+```bash
+rc-apps deploy --url <server_url> -u <user> -p <pwd>
+```
+
+> ⚠️ You must have admin credentials and an active Rocket.Chat instance with developer mode enabled.
 
 ---
 
@@ -125,33 +117,7 @@ const apiKey = "YOUR_GEMINI_API_KEY"
 ```
 
 ---
-
 ## 📄 License
 
-This project is licensed under the **MIT License**.
+This project is licensed under the [MIT License](./LICENSE).
 
-```
-MIT License
-
-Copyright (c) 2025 [Your Name]
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the “Software”), to deal
-in the Software without restriction, including without limitation the rights  
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell      
-copies of the Software, and to permit persons to whom the Software is         
-furnished to do so, subject to the following conditions:                       
-
-The above copyright notice and this permission notice shall be included in    
-all copies or substantial portions of the Software.                           
-
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR    
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,      
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE   
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER        
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN     
-THE SOFTWARE.
-```
-
-> ✏️ Replace `[Your Name]` with your actual name or GitHub username.
