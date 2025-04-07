@@ -1,0 +1,18 @@
+{
+    "id": "2eaccbef-6367-4d40-8821-1c76bee6d9d8",
+    "version": "0.0.1",
+    "requiredApiVersion": "^1.44.0",
+    "iconFile": "icon.png",
+    "author": {
+        "name": "Vasita Puppala",
+        "homepage": "rocketchat.com",
+        "support": "support.rocketchat.com"
+    },
+    "name": "Translation",
+    "nameSlug": "translation",
+    "classFile": "TranscriptionApp.ts",
+    "description": "A translation app for gsoc practice",
+    "implements": [
+        "IPostMessageSent"
+    ]
+}
