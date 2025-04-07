@@ -3,6 +3,10 @@
 This project is a prototype Rocket.Chat App that automatically detects `.mp3` audio attachments in messages, transcribes the speech using a Flask backend (Google Speech Recognition), and translates the output using the Gemini API. It replies back to the sender in the thread with both the original transcription and its translation.
 
 ---
+## 🎥 Demo Video
+
+[![Watch the demo](https://img.youtube.com/vi/8YZsTKeM-iY/hqdefault.jpg)](https://www.youtube.com/watch?v=8YZsTKeM-iY)
+
 
 ## 📂 Project Structure
 
