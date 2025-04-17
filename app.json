@@ -13,6 +13,7 @@
     "classFile": "TranscriptionApp.ts",
     "description": "A translation app for gsoc practice",
     "implements": [
-        "IPostMessageSent"
+        "IPostMessageSent",
+        "IUIKitInteractionHandler"
     ]
 }

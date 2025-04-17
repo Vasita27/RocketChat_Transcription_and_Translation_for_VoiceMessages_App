@@ -11,6 +11,7 @@ app = Flask(__name__)
 def transcribe():
     data = request.get_json()
     if not data or 'audio_url' not in data:
+        print("no proper data")
         return jsonify({'error': 'Missing audio_url in request'}), 400
 
     audio_url = data['audio_url']
@@ -48,3 +49,4 @@ def transcribe():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5005, debug=True)
+
