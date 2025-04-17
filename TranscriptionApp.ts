@@ -183,7 +183,7 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
 
         logger.debug(`[transcribeAudioMessage] Sending request to ${audioUrl} with timeout ${timeout}ms`);
         try {
-            const response = await http.post('http://192.168.137.105:5005/transcribe', {
+            const response = await http.post('http://deviceipadress:5005/transcribe', {
                 headers: {
                     'Content-Type': 'application/json',
                 },
@@ -210,7 +210,7 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
 
        
         try {
-            const apiKey = "AIzaSyDp0xUQXA3AegT15k-ruzV9q0zHV4QSAs8"; // Replace with your actual API key
+            const apiKey = "api_key_here"; // Replace with your actual API key
             const response = await http.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                 headers: {
                     "Content-Type": "application/json",
