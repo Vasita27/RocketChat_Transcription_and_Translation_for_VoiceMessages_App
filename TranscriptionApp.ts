@@ -224,3 +224,4 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
         }
     }
 }
+
