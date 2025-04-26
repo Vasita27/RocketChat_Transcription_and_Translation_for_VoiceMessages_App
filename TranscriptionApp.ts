@@ -1,3 +1,4 @@
+// Import Statements
 import {
     IAppAccessors,
     IHttp,
@@ -38,21 +39,13 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
         persistence: IPersistence,
         modify: IModify
     ): Promise<void> {
-        const logger = this.getLogger();
-
-        if (!message.attachments || message.attachments.length === 0) {
-            return;
-        }
+        if (!message.attachments || message.attachments.length === 0) return;
 
         for (const attachment of message.attachments) {
             const rawUrl = attachment.audioUrl;
-
-            if (!rawUrl) {
-                continue;
-            }
+            if (!rawUrl) continue;
 
             const fullAudioUrl = `http://localhost:3000${rawUrl}`;
-
             const block = modify.getCreator().getBlockBuilder();
 
             block.addSectionBlock({
@@ -63,7 +56,7 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
                 elements: [
                     block.newButtonElement({
                         text: block.newPlainTextObject('Transcribe & Translate'),
-                        actionId: 'transcribe_translate',
+                        actionId: 'select_language',
                         value: JSON.stringify({
                             audioUrl: fullAudioUrl,
                             originalMsgId: message.id,
@@ -72,16 +65,12 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
                 ],
             });
 
-            try {
-                await modify.getCreator().finish(
-                    modify.getCreator().startMessage()
-                        .setRoom(message.room)
-                        .setSender(message.sender)
-                        .setBlocks(block)
-                );
-            } catch (error) {
-                logger.error('Error sending initial transcription button message:', error);
-            }
+            await modify.getCreator().finish(
+                modify.getCreator().startMessage()
+                    .setRoom(message.room)
+                    .setSender(message.sender)
+                    .setBlocks(block)
+            );
         }
     }
 
@@ -95,150 +84,143 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
         const data = context.getInteractionData();
         const user = data.user;
         const room = data.room;
-    
-        const { audioUrl, originalMsgId } = JSON.parse(data.value || '{}');
+        const actionId = data.actionId;
         const logger = this.getLogger();
     
-        logger.debug(`[executeBlockActionHandler] Started for user ${user.id} in room ${room?.id} with audioUrl: ${audioUrl}, originalMsgId: ${originalMsgId}`);
+        if (actionId === 'select_language') {
+            const { audioUrl, originalMsgId } = JSON.parse(data.value || '{}');
+            const block = modify.getCreator().getBlockBuilder();
     
-        // Fire and forget
-        this.handleTranscriptionAndReply(audioUrl, originalMsgId, user.id, room?.id ?? '', read, http, modify, logger)
-            .then(() => logger.debug(`[executeBlockActionHandler] Async work done.`))
-            .catch((error) => logger.error(`[executeBlockActionHandler] Error in async work: ${error}`));
+            block.addSectionBlock({
+                text: block.newMarkdownTextObject('🌍 *Choose the language you want to translate into:*'),
+            });
     
-        // Return success response right away to avoid timeout
+            block.addActionsBlock({
+                elements: ['es', 'fr', 'de', 'hi', 'ja'].map(lang =>
+                    block.newButtonElement({
+                        text: block.newPlainTextObject(lang.toUpperCase()),
+                        actionId: 'transcribe_translate',
+                        value: JSON.stringify({
+                            audioUrl,
+                            originalMsgId,
+                            targetLanguage: lang
+                        }),
+                    })
+                ),
+            });
+    
+            await modify.getCreator().finish(
+                modify.getCreator().startMessage()
+                    .setRoom(room!)
+                    .setSender(user)
+                    .setBlocks(block)
+            );
+            
+            // Send a success response to close the modal
+            return context.getInteractionResponder().successResponse();
+        }
+    
+        if (actionId === 'transcribe_translate') {
+            const { audioUrl, originalMsgId, targetLanguage } = JSON.parse(data.value || '{}');
+            this.handleTranscriptionAndReply(audioUrl, originalMsgId, user.id, room?.id ?? '', targetLanguage, read, http, modify, logger)
+                .catch((error) => logger.error(`[executeBlockActionHandler] Error: ${error}`));
+    
+            // Respond with success once the action is completed
+            return context.getInteractionResponder().successResponse();
+        }
+    
         return context.getInteractionResponder().successResponse();
     }
     
+
     private async handleTranscriptionAndReply(
         audioUrl: string,
         originalMsgId: string,
         userId: string,
         roomId: string,
+        targetLanguage: string,
         read: IRead,
         http: IHttp,
         modify: IModify,
         logger: ILogger
     ): Promise<void> {
         let transcribedText: string | null = null;
-        logger.debug(`[handleTranscriptionAndReply] Starting transcription for ${audioUrl}`);
         try {
             transcribedText = await this.transcribeAudioMessage(audioUrl, http, logger);
-            logger.debug(`[handleTranscriptionAndReply] Transcription successful: ${transcribedText}`);
         } catch (e) {
-            logger.error(`[handleTranscriptionAndReply] Transcription error: ${e}`);
-            transcribedText = '❌ Transcription failed.';
+            transcribedText = null;
         }
+
+        if (!transcribedText) {
+    const userObj = await read.getUserReader().getById(userId);
+    const roomObj = await read.getRoomReader().getById(roomId);
+    const appUser = await read.getUserReader().getAppUser();
+
+    if (!userObj || !roomObj || !appUser) {
+        this.getLogger().error(`Missing user, room, or app user: userId=${userId}, roomId=${roomId}`);
+        return;
+    }
+
+    return modify.getNotifier().notifyUser(userObj, {
+        sender: appUser,
+        room: roomObj,
+        text: '❌ Transcription failed.',
+    });
+}
+
+        
 
         let translatedText: string | null = null;
-        logger.debug(`[handleTranscriptionAndReply] Starting translation for "${transcribedText}"`);
         try {
-            translatedText = await this.translateText(transcribedText!, 'es', http, logger);
-            logger.debug(`[handleTranscriptionAndReply] Translation successful: ${translatedText}`);
+            translatedText = await this.translateText(transcribedText, targetLanguage, http, logger);
         } catch (e) {
-            logger.error(`[handleTranscriptionAndReply] Translation failed: ${e}`);
+            translatedText = null;
         }
 
-        const textToSend = `*Transcription:* ${transcribedText}${translatedText ? `\n*Translation (ES):* ${translatedText}` : ''}`;
+        const roomObj = await read.getRoomReader().getById(roomId);
+        const userObj = await read.getUserReader().getById(userId);
 
-        logger.debug(`[handleTranscriptionAndReply] Sending reply: ${textToSend}`);
-        try {
-            const roomObj = await read.getRoomReader().getById(roomId);
-            if (!roomObj) {
-                throw new Error(`Room with ID ${roomId} not found`);
-            }
-            const userObj = await read.getUserReader().getById(userId);
-            if (!userObj) {
-                throw new Error(`User with ID ${userId} not found`);
-            }
+        const textToSend = `*Transcription:* ${transcribedText}\n*Translation (${targetLanguage.toUpperCase()}):* ${translatedText ?? '❌ Translation failed.'}`;
 
-            const builder = modify.getCreator().startMessage()
-                .setRoom(roomObj)
-                .setSender(userObj)
-                .setText(textToSend)
-                .setThreadId(originalMsgId);
+        const builder = modify.getCreator().startMessage()
+            .setRoom(roomObj!)
+            .setSender(userObj!)
+            .setText(textToSend)
+            .setThreadId(originalMsgId);
 
-            await modify.getCreator().finish(builder);
-            logger.debug(`[handleTranscriptionAndReply] Reply sent successfully.`);
-        } catch (error) {
-            logger.error(`[handleTranscriptionAndReply] Error sending reply: ${error}`);
-            // Optionally send an error message to the user
-            try {
-                await modify.getCreator().finish(
-                    modify.getCreator().startMessage()
-                        .setRoom((await read.getRoomReader().getById(roomId)) ?? (() => { throw new Error(`Room with ID ${roomId} not found`); })())
-                        .setSender(await read.getUserReader().getById(userId)!)
-                        .setText('❌ Failed to process the audio message. Please try again later.')
-                        .setThreadId(originalMsgId)
-                );
-            } catch (replyError) {
-                logger.error('Error sending failure reply:', replyError);
-            }
-        }
+        await modify.getCreator().finish(builder);
     }
 
     private async transcribeAudioMessage(audioUrl: string, http: IHttp, logger: ILogger): Promise<string | null> {
-        const timeout = 15000; // Set a timeout for the transcription request (in milliseconds)
-        const startTime = Date.now();
-
-        logger.debug(`[transcribeAudioMessage] Sending request to ${audioUrl} with timeout ${timeout}ms`);
         try {
-            const response = await http.post('http://192.168.137.105:5005/transcribe', {
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+            const response = await http.post('http://deviceipadress:5005/transcribe', {
+                headers: { 'Content-Type': 'application/json' },
                 data: { audio_url: audioUrl },
-            }); // Apply the timeout
-            logger.debug(`[transcribeAudioMessage] Received response in ${Date.now() - startTime}ms with status code: ${response.statusCode}, data: ${JSON.stringify(response.data)}`);
-
-            if (response.statusCode !== 200 || !response.data || !response.data.text) {
-                const errorMessage = `Transcription API Error: ${JSON.stringify(response.data)}`;
-                logger.error(`[transcribeAudioMessage] ${errorMessage}`);
-                throw new Error(errorMessage);
-            }
-
-            return response.data.text;
+            });
+            return response.data.text ?? null;
         } catch (error) {
-            logger.error(`[transcribeAudioMessage] Request failed after ${Date.now() - startTime}ms: ${error}`);
-            throw error; // Re-throw the error to be caught in handleTranscriptionAndReply
+            logger.error(`[transcribeAudioMessage] ${error}`);
+            return null;
         }
     }
 
     private async translateText(text: string, targetLanguage: string, http: IHttp, logger: ILogger): Promise<string | null> {
-        
-        const startTime = Date.now();
-
-       
         try {
-            const apiKey = "AIzaSyDp0xUQXA3AegT15k-ruzV9q0zHV4QSAs8"; // Replace with your actual API key
+            const apiKey = "GEMINI_API_KEY"; // Replace with your actual API key
             const response = await http.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-                headers: {
-                    "Content-Type": "application/json",
-                },
+                headers: { "Content-Type": "application/json" },
                 data: {
-                    contents: [
-                        {
-                            parts: [
-                                {
-                                    text: `Translate the following English sentence to ${targetLanguage}:\n\n"${text}". Return only the translated text.`
-                                }
-                            ]
-                        }
-                    ]
+                    contents: [{
+                        parts: [{
+                            text: `Translate the following English sentence to ${targetLanguage}:\n\n"${text}". Return only the translated text.`
+                        }]
+                    }]
                 }
-            }); // Apply the timeout
-            logger.debug(`[translateText] Received response in ${Date.now() - startTime}ms with status code: ${response.statusCode}, data: ${JSON.stringify(response.data)}`);
-
-            if (response.statusCode !== 200) {
-                const errorMessage = `Gemini translation failed: ${JSON.stringify(response.data)}`;
-                logger.error(`[translateText] ${errorMessage}`);
-                throw new Error(errorMessage);
-            }
-
+            });
             return response.data.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
         } catch (error) {
-            logger.error(`[translateText] Request failed after ${Date.now() - startTime}ms: ${error}`);
-            throw error; // Re-throw the error
+            logger.error(`[translateText] ${error}`);
+            return null;
         }
     }
 }

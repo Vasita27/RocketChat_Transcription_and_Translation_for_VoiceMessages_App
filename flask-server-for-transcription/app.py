@@ -15,6 +15,7 @@ def transcribe():
         return jsonify({'error': 'Missing audio_url in request'}), 400
 
     audio_url = data['audio_url']
+   
     recognizer = sr.Recognizer()
 
     try:
