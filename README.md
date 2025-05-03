@@ -39,11 +39,14 @@ Rocket.Chat
 pip install flask requests pydub speechrecognition
 ```
 
+**Replace the assembly_api_key with your assembly api key**
+
 **Run Flask server: (in proper path)**
 
 ```bash
 python app.py
 ```
+
 
 > ✅ Make sure your local IP is accessible from Rocket.Chat.
 
