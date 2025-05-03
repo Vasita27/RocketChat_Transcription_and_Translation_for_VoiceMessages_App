@@ -1,52 +1,95 @@
-from flask import Flask, request, jsonify
+import time
 import requests
-import speech_recognition as sr
-from pydub import AudioSegment
-import tempfile
-import os
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
+ASSEMBLYAI_API_KEY = 'assembly_api_key'
+ASSEMBLYAI_TRANSCRIBE_URL = 'https://api.assemblyai.com/v2/transcript'
+ASSEMBLYAI_UPLOAD_URL = 'https://api.assemblyai.com/v2/upload'
+
+HEADERS = {
+    'authorization': ASSEMBLYAI_API_KEY,
+    'content-type': 'application/json'
+}
+
 @app.route('/transcribe', methods=['POST'])
-def transcribe():
-    data = request.get_json()
-    if not data or 'audio_url' not in data:
-        print("no proper data")
-        return jsonify({'error': 'Missing audio_url in request'}), 400
-
-    audio_url = data['audio_url']
-   
-    recognizer = sr.Recognizer()
-
+def transcribe_audio():
     try:
-        # Download the audio file
-        response = requests.get(audio_url)
+        data = request.get_json()
+        audio_url = data.get('audio_url')
+
+        if not audio_url:
+            return jsonify({'error': 'audio_url is required'}), 400
+
+        # Step 1: Download the audio file locally
+        print(f"[INFO] Downloading audio from Rocket.Chat: {audio_url}")
+        audio_response = requests.get(audio_url, stream=True)
+
+        if audio_response.status_code != 200:
+            return jsonify({'error': 'Failed to download audio file', 'details': audio_response.text}), 500
+
+        # Step 2: Upload the file to AssemblyAI
+        print("[INFO] Uploading file to AssemblyAI")
+        upload_response = requests.post(
+            ASSEMBLYAI_UPLOAD_URL,
+            headers={'authorization': ASSEMBLYAI_API_KEY},
+            data=audio_response.content
+        )
+
+        if upload_response.status_code != 200:
+            return jsonify({'error': 'Upload to AssemblyAI failed', 'details': upload_response.text}), 500
+
+        uploaded_audio_url = upload_response.json()['upload_url']
+
+        # Step 3: Start transcription with speaker labels
+        transcript_request = {
+            'audio_url': uploaded_audio_url,
+            'speaker_labels': True
+        }
+
+        print("[INFO] Sending transcription request to AssemblyAI")
+        response = requests.post(ASSEMBLYAI_TRANSCRIBE_URL, json=transcript_request, headers=HEADERS)
         if response.status_code != 200:
-            return jsonify({'error': f'Failed to download audio: {response.status_code}'}), 400
+            return jsonify({'error': 'Failed to start transcription', 'details': response.text}), 500
 
-        # Save as temp .mp3 file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as mp3_file:
-            mp3_file.write(response.content)
-            mp3_path = mp3_file.name
+        transcript_id = response.json()['id']
+        print(f"[INFO] Transcript job started. ID: {transcript_id}")
 
-        # Convert .mp3 to .wav using pydub
-        wav_path = mp3_path.replace(".mp3", ".wav")
-        audio_segment = AudioSegment.from_mp3(mp3_path)
-        audio_segment.export(wav_path, format="wav")
+        # Step 4: Poll for completion
+        while True:
+            poll_response = requests.get(f'{ASSEMBLYAI_TRANSCRIBE_URL}/{transcript_id}', headers=HEADERS)
+            status = poll_response.json()['status']
+            print(f"[INFO] Polling status: {status}")
+            if status == 'completed':
+                break
+            elif status == 'error':
+                return jsonify({'error': 'Transcription failed', 'details': poll_response.json()}), 500
+            time.sleep(2)
 
-        # Use speech_recognition on the converted .wav file
-        with sr.AudioFile(wav_path) as source:
-            audio_data = recognizer.record(source)
-            text = recognizer.recognize_google(audio_data)
+        result = poll_response.json()
+        utterances = result.get('utterances', [])
 
-        # Clean up temp files
-        os.remove(mp3_path)
-        os.remove(wav_path)
+        formatted_transcript = ""
+        print(utterances)
+        for utt in utterances:
+            try:
+                speaker = f"Speaker {utt['speaker']}"
+            except (ValueError, TypeError):
+                speaker = "Speaker Unknown"
+            text = utt.get('text', '')
+            formatted_transcript += f"{speaker}: {text}\n"
 
-        return jsonify({'text': text})
+
+        return jsonify({
+            'id': transcript_id,
+            'text': formatted_transcript.strip(),
+            'utterances': utterances
+        })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(e)
+        return jsonify({'error': 'Server error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5005, debug=True)

@@ -27,6 +27,11 @@ import {
     App,
 } from '@rocket.chat/apps-engine/definition/App';
 
+import {
+    RocketChatAssociationModel,
+    RocketChatAssociationRecord,
+} from '@rocket.chat/apps-engine/definition/metadata';
+
 export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInteractionHandler {
     constructor(info: IAppInfo, logger: ILogger, accessors: IAppAccessors) {
         super(info, logger, accessors);
@@ -86,15 +91,15 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
         const room = data.room;
         const actionId = data.actionId;
         const logger = this.getLogger();
-    
+
         if (actionId === 'select_language') {
             const { audioUrl, originalMsgId } = JSON.parse(data.value || '{}');
             const block = modify.getCreator().getBlockBuilder();
-    
+
             block.addSectionBlock({
                 text: block.newMarkdownTextObject('🌍 *Choose the language you want to translate into:*'),
             });
-    
+
             block.addActionsBlock({
                 elements: ['es', 'fr', 'de', 'hi', 'ja'].map(lang =>
                     block.newButtonElement({
@@ -108,30 +113,28 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
                     })
                 ),
             });
-    
-            await modify.getCreator().finish(
-                modify.getCreator().startMessage()
-                    .setRoom(room!)
-                    .setSender(user)
-                    .setBlocks(block)
-            );
+
+            const appUser = await read.getUserReader().getAppUser();
+            await modify.getNotifier().notifyUser(user, {
+                sender: appUser!,
+                room: room!,
+                blocks: block.getBlocks(),
+            });
             
-            // Send a success response to close the modal
+
             return context.getInteractionResponder().successResponse();
         }
-    
+
         if (actionId === 'transcribe_translate') {
             const { audioUrl, originalMsgId, targetLanguage } = JSON.parse(data.value || '{}');
-            this.handleTranscriptionAndReply(audioUrl, originalMsgId, user.id, room?.id ?? '', targetLanguage, read, http, modify, logger)
+            this.handleTranscriptionAndReply(audioUrl, originalMsgId, user.id, room?.id ?? '', targetLanguage, read, http, modify, persistence, logger)
                 .catch((error) => logger.error(`[executeBlockActionHandler] Error: ${error}`));
-    
-            // Respond with success once the action is completed
+
             return context.getInteractionResponder().successResponse();
         }
-    
+
         return context.getInteractionResponder().successResponse();
     }
-    
 
     private async handleTranscriptionAndReply(
         audioUrl: string,
@@ -142,53 +145,69 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
         read: IRead,
         http: IHttp,
         modify: IModify,
+        persistence: IPersistence,
         logger: ILogger
     ): Promise<void> {
-        let transcribedText: string | null = null;
-        try {
-            transcribedText = await this.transcribeAudioMessage(audioUrl, http, logger);
-        } catch (e) {
-            transcribedText = null;
+        const transKey = new RocketChatAssociationRecord(RocketChatAssociationModel.MESSAGE, `${originalMsgId}_transcription`);
+        const transResults = await read.getPersistenceReader().readByAssociation(transKey) as Array<{ text: string }>;
+
+        let transcribedText = transResults.length ? transResults[0].text : null;
+        let textToSend = '';
+        if (transcribedText){
+            textToSend = `This transcription and translation is already available. \n`;
+        }
+        
+        if (!transcribedText) {
+            try {
+                transcribedText = await this.transcribeAudioMessage(audioUrl, http, logger);
+                if (transcribedText) {
+                    await persistence.createWithAssociation({ text: transcribedText }, transKey);
+                }
+            } catch (e) {
+                logger.error(`[Transcription] Failed: ${e}`);
+            }
         }
 
         if (!transcribedText) {
-    const userObj = await read.getUserReader().getById(userId);
-    const roomObj = await read.getRoomReader().getById(roomId);
-    const appUser = await read.getUserReader().getAppUser();
+            const userObj = await read.getUserReader().getById(userId);
+            const roomObj = await read.getRoomReader().getById(roomId);
+            const appUser = await read.getUserReader().getAppUser();
 
-    if (!userObj || !roomObj || !appUser) {
-        this.getLogger().error(`Missing user, room, or app user: userId=${userId}, roomId=${roomId}`);
-        return;
-    }
+            return modify.getNotifier().notifyUser(userObj!, {
+                sender: appUser!,
+                room: roomObj!,
+                text: '❌ Transcription failed.',
+            });
+        }
 
-    return modify.getNotifier().notifyUser(userObj, {
-        sender: appUser,
-        room: roomObj,
-        text: '❌ Transcription failed.',
-    });
-}
+        const translateKey = new RocketChatAssociationRecord(RocketChatAssociationModel.MESSAGE, `${originalMsgId}_translation_${targetLanguage}`);
+        const translateResults = await read.getPersistenceReader().readByAssociation(translateKey) as Array<{ text: string }>;
 
-        
+        let translatedText = translateResults.length ? translateResults[0].text : null;
 
-        let translatedText: string | null = null;
-        try {
-            translatedText = await this.translateText(transcribedText, targetLanguage, http, logger);
-        } catch (e) {
-            translatedText = null;
+        if (!translatedText) {
+            try {
+                translatedText = await this.translateText(transcribedText, targetLanguage, http, logger);
+                if (translatedText) {
+                    await persistence.createWithAssociation({ text: translatedText }, translateKey);
+                }
+            } catch (e) {
+                logger.error(`[Translation] Failed: ${e}`);
+            }
         }
 
         const roomObj = await read.getRoomReader().getById(roomId);
         const userObj = await read.getUserReader().getById(userId);
 
-        const textToSend = `*Transcription:* ${transcribedText}\n*Translation (${targetLanguage.toUpperCase()}):* ${translatedText ?? '❌ Translation failed.'}`;
+        textToSend += `*Transcription:* ${transcribedText}\n*Translation (${targetLanguage.toUpperCase()}):* ${translatedText ?? '❌ Translation failed.'}`;
+        const appUser = await read.getUserReader().getAppUser();
 
-        const builder = modify.getCreator().startMessage()
-            .setRoom(roomObj!)
-            .setSender(userObj!)
-            .setText(textToSend)
-            .setThreadId(originalMsgId);
-
-        await modify.getCreator().finish(builder);
+        await modify.getNotifier().notifyUser(userObj!, {
+            sender: appUser!,
+            room: roomObj!,
+            text: textToSend,
+        });
+        
     }
 
     private async transcribeAudioMessage(audioUrl: string, http: IHttp, logger: ILogger): Promise<string | null> {
@@ -206,7 +225,7 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
 
     private async translateText(text: string, targetLanguage: string, http: IHttp, logger: ILogger): Promise<string | null> {
         try {
-            const apiKey = "GEMINI_API_KEY"; // Replace with your actual API key
+            const apiKey = "gemini_api_key"; // Replace with your actual API key
             const response = await http.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                 headers: { "Content-Type": "application/json" },
                 data: {
@@ -224,4 +243,3 @@ export class TranscriptionApp extends App implements IPostMessageSent, IUIKitInt
         }
     }
 }
-
